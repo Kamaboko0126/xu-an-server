@@ -20,5 +20,12 @@ def home():
 def check_connect_health():
     return {"status":"Success"}
 
+@app.post('/sdada')
+def some_function():
+
+
+
+    return {"post":"Success"}
+
 if __name__ == "__main__":
     uvicorn.run(app, port=10000)
