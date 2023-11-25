@@ -133,7 +133,7 @@ def check_connect_health():
 
 
 def send_email(to, subject, body):
-    yag = yagmail.SMTP('3A852030@gm.student.ncut.edu.tw', 'lion0126')
+    yag = yagmail.SMTP()
     yag.send(
         to=to,
         subject=subject,
