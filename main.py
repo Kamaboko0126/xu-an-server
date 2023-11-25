@@ -7,6 +7,7 @@ import sqlite3
 import hashlib
 import uuid
 import yagmail
+from mymail import myEmail, myPassword
 
 create_db()
 
@@ -22,9 +23,11 @@ class VerifyData(BaseModel):
     email: str
     key: str
 
+
 class LoginData(BaseModel):
     email: str
     password: str
+
 
 app = FastAPI()
 app.add_middleware(
@@ -133,7 +136,7 @@ def check_connect_health():
 
 
 def send_email(to, subject, body):
-    yag = yagmail.SMTP()
+    yag = yagmail.SMTP(myEmail, myPassword)
     yag.send(
         to=to,
         subject=subject,
