@@ -1,1 +1,30 @@
 /__pycache__
+
+@app.post("/verify")
+def verify(data: VerifyData = Body(...)):
+    email = data.email
+    public_key = data.key
+
+    print("verify")
+    print(email, public_key)
+    conn = sqlite3.connect('users.db')
+    # Add this line to return query results as dictionaries
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+
+    # Retrieve the user record from the database
+    c.execute("SELECT * FROM users WHERE email = ?", (email,))
+    user = c.fetchone()
+
+    # Check if the user is already verified
+    if user and user['Verified']:
+        return {"status": "verified"}
+
+    # Check if the public keys match
+    if user and user['publicKey'] == public_key:
+        # Update the 'Verified' field to 1
+        c.execute("UPDATE users SET Verified = 1 WHERE email = ?", (email,))
+        conn.commit()
+        return {"status": "success"}
+    else:
+        return {"status": "verification failed"}
