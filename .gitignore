@@ -1,5 +1,6 @@
 /__pycache__
-mymail.py
+
+identifyinformation.py
 
 @app.post("/verify")
 def verify(data: VerifyData = Body(...)):

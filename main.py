@@ -1,5 +1,5 @@
 import uvicorn
-from fastapi import FastAPI, Query, Body
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
 from users import create_db
@@ -7,7 +7,9 @@ import sqlite3
 import hashlib
 import uuid
 import yagmail
-from mymail import myEmail, myPassword
+from identifyinformation import MyEmail, MyPassword, MySecretKey
+import jwt
+import time
 
 create_db()
 
@@ -27,6 +29,13 @@ class VerifyData(BaseModel):
 class LoginData(BaseModel):
     email: str
     password: str
+
+
+class EditData(BaseModel):
+    user_id: str
+    password: str
+    firstName: str
+    lastName: str
 
 
 app = FastAPI()
@@ -62,8 +71,12 @@ def create_user(user: User):
         # Create a SHA256 hash of the UUID
         public_key = hashlib.sha256(
             str(random_uuid).encode('utf-8')).hexdigest()
-        c.execute("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)",
-                  (user.firstName, user.lastName, user.email, user.password, public_key, 0))
+        # Generate a random UUID
+        random_uuid = uuid.uuid4()
+        # Convert the UUID to a string
+        user_id = str(random_uuid)
+        c.execute("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, ?)",
+                  (user_id, user.firstName, user.lastName, user.email, user.password, public_key, 0))
 
         send_email(user.email, 'Hello', 'http://127.0.0.1:8080/verify?email=' +
                    user.email + '&key=' + public_key)
@@ -125,9 +138,72 @@ async def login(data: LoginData):
 
     # Check if the email and password match
     if user and user['password'] == data.password:
-        return {"status": "success"}
+        payload = {
+            'user_id': user['user_id'],
+            'iat': time.time(),  # Add the issued at claim
+        }
+        token = jwt.encode(payload, MySecretKey, algorithm='HS256')
+        return {
+            "status": "success",
+            "token": token,
+            "firstname": user['firstName'],
+            "lastname": user['lastName'],
+            "userid": user['user_id'],
+            "useremail": user['email']
+        }
     else:
         return {"status": "wrong password"}
+
+
+@app.get("/verify-token")
+def verify_token(token: str, userid: str):
+    try:
+        payload = jwt.decode(token, MySecretKey, algorithms=["HS256"])
+        if payload["user_id"] != userid:
+            return {"status": "Token is invalid"}
+        else:
+            return {"status": "Token success verified"}
+    except jwt.ExpiredSignatureError:
+        return {"status": "Error", "detail": "Token is expired"}
+    except jwt.InvalidTokenError:
+        return {"status": "Error", "detail": "Token is invalid"}
+
+
+@app.post("/edit")
+async def update_user(data: EditData):
+    # Connect to the SQLite database
+    conn = sqlite3.connect('users.db')
+    cur = conn.cursor()
+
+    # Check if the password is correct
+    cur.execute("SELECT password FROM users WHERE user_id = ?",
+                (data.user_id,))
+    result = cur.fetchone()
+    if not result or result[0] != data.password:
+        return {"status": "wrong password"}
+
+    # Update the firstName and lastName
+    cur.execute("""
+        UPDATE users
+        SET firstName = ?, lastName = ?
+        WHERE user_id = ?
+    """, (data.firstName, data.lastName, data.user_id))
+
+    # Commit the changes and close the connection
+    conn.commit()
+
+    # Fetch the updated firstName and lastName
+    cur.execute(
+        "SELECT firstName, lastName FROM users WHERE user_id = ?", (data.user_id,))
+    result = cur.fetchone()
+
+    conn.close()
+
+    print(result[0],result[1])
+    if result:
+        return {"status": "success", "firstname": result[0], "lastname": result[1]}
+    else:
+        return {"status": "fail"}
 
 
 @app.get("/health")
@@ -136,7 +212,7 @@ def check_connect_health():
 
 
 def send_email(to, subject, body):
-    yag = yagmail.SMTP(myEmail, myPassword)
+    yag = yagmail.SMTP(MyEmail, MyPassword)
     yag.send(
         to=to,
         subject=subject,

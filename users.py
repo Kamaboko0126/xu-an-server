@@ -8,7 +8,7 @@ def create_db():
     # Create table if it does not exist
     c.execute('''
     CREATE TABLE IF NOT EXISTS users
-    (firstName text, lastName text, email text, password text, publicKey text, Verified boolean DEFAULT 0)
+    (user_id text, firstName text, lastName text, email text, password text, publicKey text, Verified boolean DEFAULT 0)
     ''')
 
     # Save (commit) the changes
