@@ -37,6 +37,10 @@ class EditData(BaseModel):
     firstName: str
     lastName: str
 
+class ChangeData(BaseModel):
+    user_id: str
+    oldPassword: str
+    newPassword: str
 
 app = FastAPI()
 app.add_middleware(
@@ -205,6 +209,28 @@ async def update_user(data: EditData):
     else:
         return {"status": "fail"}
 
+@app.post("/change")
+async def change_password(data: ChangeData):
+    # Connect to the SQLite database
+    conn = sqlite3.connect('users.db')
+    cur = conn.cursor()
+
+    # Check if the old password is correct
+    cur.execute("SELECT password FROM users WHERE user_id = ?",
+                (data.user_id,))
+    result = cur.fetchone()
+    if not result or result[0] != data.oldPassword:
+        return {"status": "wrong password"}
+
+    # Update the password
+    cur.execute("""
+        UPDATE users
+        SET password = ?
+        WHERE user_id = ?
+    """, (data.newPassword, data.user_id))
+
+    conn.commit()
+    return {"status": "success"}
 
 @app.get("/health")
 def check_connect_health():
