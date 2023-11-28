@@ -1,6 +1,7 @@
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr
 from users import create_db
 import sqlite3
@@ -10,6 +11,10 @@ import yagmail
 from identifyinformation import MyEmail, MyPassword, MySecretKey
 import jwt
 import time
+from passlib.context import CryptContext
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 create_db()
 
@@ -51,6 +56,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+
+@app.exception_handler(RateLimitExceeded)
+async def ratelimit_handler(request: Request, exc: RateLimitExceeded):
+    return JSONResponse(status_code=429, content={"status": "too many times"})
+
 # your app code here
 
 
@@ -58,9 +70,14 @@ app.add_middleware(
 def home():
     return {"Data": "Test"}
 
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def hash_password(password: str):
+    return pwd_context.hash(password)
 
 @app.post("/adduser")
-def create_user(user: User):
+@limiter.limit("5/minute")
+def create_user(request: Request, user: User):
     conn = sqlite3.connect('users.db')
     c = conn.cursor()
 
@@ -79,8 +96,12 @@ def create_user(user: User):
         random_uuid = uuid.uuid4()
         # Convert the UUID to a string
         user_id = str(random_uuid)
+
+        # Hash the user's password
+        hashed_password = hash_password(user.password)
+
         c.execute("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, ?)",
-                  (user_id, user.firstName, user.lastName, user.email, user.password, public_key, 0))
+                  (user_id, user.firstName, user.lastName, user.email, hashed_password, public_key, 0))
 
         send_email(user.email, 'Hello', 'http://127.0.0.1:8080/verify?email=' +
                    user.email + '&key=' + public_key)
@@ -123,7 +144,8 @@ async def verify(data: VerifyData):
 
 
 @app.post('/login')
-async def login(data: LoginData):
+@limiter.limit("5/minute")
+async def login(request: Request, data: LoginData):
     conn = sqlite3.connect('users.db')
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
@@ -141,7 +163,7 @@ async def login(data: LoginData):
         return {"status": "verify yet"}
 
     # Check if the email and password match
-    if user and user['password'] == data.password:
+    if user and pwd_context.verify(data.password, user['password']):
         payload = {
             'user_id': user['user_id'],
             'iat': time.time(),  # Add the issued at claim
@@ -174,7 +196,8 @@ def verify_token(token: str, userid: str):
 
 
 @app.post("/edit")
-async def update_user(data: EditData):
+@limiter.limit("5/minute")
+async def update_user(request: Request, data: EditData):
     # Connect to the SQLite database
     conn = sqlite3.connect('users.db')
     cur = conn.cursor()
@@ -183,7 +206,7 @@ async def update_user(data: EditData):
     cur.execute("SELECT password FROM users WHERE user_id = ?",
                 (data.user_id,))
     result = cur.fetchone()
-    if not result or result[0] != data.password:
+    if not result or not pwd_context.verify(data.password, result[0]):
         return {"status": "wrong password"}
 
     # Update the firstName and lastName
@@ -210,7 +233,8 @@ async def update_user(data: EditData):
         return {"status": "fail"}
 
 @app.post("/change")
-async def change_password(data: ChangeData):
+@limiter.limit("5/minute")
+async def change_password(request: Request, data: ChangeData):
     # Connect to the SQLite database
     conn = sqlite3.connect('users.db')
     cur = conn.cursor()
@@ -219,15 +243,18 @@ async def change_password(data: ChangeData):
     cur.execute("SELECT password FROM users WHERE user_id = ?",
                 (data.user_id,))
     result = cur.fetchone()
-    if not result or result[0] != data.oldPassword:
+    if not result or not pwd_context.verify(data.oldPassword, result[0]):
         return {"status": "wrong password"}
+
+    # Hash the new password
+    hashed_new_password = pwd_context.hash(data.newPassword)
 
     # Update the password
     cur.execute("""
         UPDATE users
         SET password = ?
         WHERE user_id = ?
-    """, (data.newPassword, data.user_id))
+    """, (hashed_new_password, data.user_id))
 
     conn.commit()
     return {"status": "success"}
