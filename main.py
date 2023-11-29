@@ -67,7 +67,8 @@ async def ratelimit_handler(request: Request, exc: RateLimitExceeded):
 
 
 @app.get("/")
-def home():
+@limiter.limit("5/minute")
+def home(request: Request):
     return {"Data": "Test"}
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -116,7 +117,8 @@ def create_user(request: Request, user: User):
 
 
 @app.post("/verify")
-async def verify(data: VerifyData):
+@limiter.limit("5/minute")
+async def verify(request: Request, data: VerifyData):
     email = data.email
     public_key = data.key
 
